@@ -8,8 +8,8 @@ package raft
 // test with the original before submitting.
 //
 
-import "6.5840/labgob"
-import "6.5840/labrpc"
+import "mit6.5840-2023/labgob"
+import "mit6.5840-2023/labrpc"
 import "bytes"
 import "log"
 import "sync"

@@ -1,3 +1,3 @@
-module 6.5840
+module mit6.5840-2023
 
 go 1.15

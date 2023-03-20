@@ -5,7 +5,7 @@ package main
 //
 
 import "time"
-import "6.5840/viewservice"
+import "mit6.5840-2023/viewservice"
 import "os"
 import "fmt"
 
