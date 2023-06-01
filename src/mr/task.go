@@ -16,10 +16,10 @@ type TaskMetaInfo struct {
 }
 
 type Task struct {
-	files    []string
-	id       int64
-	taskType TaskType // 任务类型判断到底是map还是reduce
-	nReduce  int      // 传入的reducer的数量，用于hash
+	Files    []string
+	Id       int64
+	TaskType TaskType // 任务类型判断到底是map还是reduce
+	NReduce  int      // 传入的reducer的数量，用于hash
 }
 
 // TaskArgs rpc应该传入的参数，可实际上应该什么都不用传,因为只是worker获取一个任务

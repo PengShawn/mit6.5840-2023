@@ -45,7 +45,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	keepFlag := true
 	for keepFlag {
 		task := GetTask()
-		switch task.taskType {
+		switch task.TaskType {
 		case MapTask:
 			DoMapTask(mapf, task)
 		case ReduceTask:
@@ -67,7 +67,7 @@ func GetTask() *Task {
 	reply := Task{}
 	ok := call("Coordinator.PollTask", &args, &reply)
 	if ok {
-		fmt.Println("worker get ", reply.taskType, "task :Id[", reply.id, "]")
+		fmt.Println("worker get ", reply.TaskType, "task :Id[", reply.Id, "]")
 	} else {
 		fmt.Printf("worker call failed!\n")
 	}
@@ -76,7 +76,7 @@ func GetTask() *Task {
 
 func DoMapTask(mapf func(string, string) []KeyValue, task *Task) {
 	var intermediate []KeyValue
-	filename := task.files[0]
+	filename := task.Files[0]
 
 	file, err := os.Open(filename)
 	if err != nil {
@@ -92,7 +92,7 @@ func DoMapTask(mapf func(string, string) []KeyValue, task *Task) {
 	intermediate = mapf(filename, string(content))
 
 	//initialize and loop over []KeyValue
-	rn := task.nReduce
+	rn := task.NReduce
 	// 创建一个长度为nReduce的二维切片
 	HashedKV := make([][]KeyValue, rn)
 
@@ -101,7 +101,7 @@ func DoMapTask(mapf func(string, string) []KeyValue, task *Task) {
 	}
 	for i := 0; i < rn; i++ {
 		//以json格式写入文件
-		oname := "mr-tmp-" + strconv.Itoa(int(task.id)) + "-" + strconv.Itoa(i)
+		oname := "mr-tmp-" + strconv.Itoa(int(task.Id)) + "-" + strconv.Itoa(i)
 		ofile, _ := os.Create(oname)
 		enc := json.NewEncoder(ofile)
 		for _, kv := range HashedKV[i] {
@@ -117,8 +117,8 @@ func DoMapTask(mapf func(string, string) []KeyValue, task *Task) {
 }
 
 func DoReduceTask(reducef func(string, []string) string, task *Task) {
-	reduceFileNum := task.id
-	intermediate := shuffle(task.files)
+	reduceFileNum := task.Id
+	intermediate := shuffle(task.Files)
 	dir, _ := os.Getwd()
 	//tempFile, err := ioutil.TempFile(dir, "mr-tmp-*")
 	tempFile, err := ioutil.TempFile(dir, "mr-tmp-*")

@@ -72,7 +72,7 @@ func (c *Coordinator) Done() bool {
 //
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
-// nReduce is the number of reduce tasks to use.
+// NReduce is the number of reduce tasks to use.
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	coordinator = &Coordinator{
@@ -94,10 +94,10 @@ func (c *Coordinator) makeMapTasks(files []string) {
 	for _, v := range files {
 		id := c.generateTaskId()
 		task := &Task{
-			id:       id,
-			taskType: MapTask,
-			nReduce:  c.nReduce,
-			files:    []string{v},
+			Id:       id,
+			TaskType: MapTask,
+			NReduce:  c.nReduce,
+			Files:    []string{v},
 		}
 		taskMetaInfo := &TaskMetaInfo{
 			state:   Waiting,
@@ -112,9 +112,9 @@ func (c *Coordinator) makeReduceTasks() {
 	for i := 0; i < c.nReduce; i++ {
 		id := c.generateTaskId()
 		task := &Task{
-			id:       id,
-			taskType: ReduceTask,
-			files:    selectReduceName(i),
+			Id:       id,
+			TaskType: ReduceTask,
+			Files:    selectReduceName(i),
 		}
 
 		// 保存任务的初始状态
@@ -153,8 +153,8 @@ func (c *Coordinator) CrashDetector() {
 		}
 		for _, v := range c.taskMetaMap {
 			if v.state == Working && time.Since(v.StartTime) > WorkerTimeOut {
-				fmt.Printf("the task[ %d ] is crash,take [%d] s\n", v.TaskAdr.id, time.Since(v.StartTime))
-				switch v.TaskAdr.taskType {
+				fmt.Printf("the task[ %d ] is crash,take [%d] s\n", v.TaskAdr.Id, time.Since(v.StartTime))
+				switch v.TaskAdr.TaskType {
 				case MapTask:
 					c.MapTaskChan <- v.TaskAdr
 					v.state = Waiting
@@ -168,8 +168,8 @@ func (c *Coordinator) CrashDetector() {
 	}
 }
 
-// PoolTask worker调用，获取任务
-func (c *Coordinator) PoolTask(args *TaskArgs, reply *Task) error {
+// PollTask worker调用，获取任务
+func (c *Coordinator) PollTask(args *TaskArgs, reply *Task) error {
 	c.Lock()
 	defer c.Unlock()
 	switch c.phase {
@@ -177,11 +177,11 @@ func (c *Coordinator) PoolTask(args *TaskArgs, reply *Task) error {
 		if len(c.MapTaskChan) > 0 {
 			*reply = *<-c.MapTaskChan
 			//fmt.Printf("poll-Map-taskid[ %d ]\n", reply.TaskId)
-			if !c.judgeState(reply.id) {
-				fmt.Printf("Map-taskid[ %d ] is running\n", reply.id)
+			if !c.judgeState(reply.Id) {
+				fmt.Printf("Map-taskid[ %d ] is running\n", reply.Id)
 			}
 		} else {
-			reply.taskType = WaitingTask // 如果map任务被分发完了但是又没完成，此时就将任务设为Waitting
+			reply.TaskType = WaitingTask // 如果map任务被分发完了但是又没完成，此时就将任务设为Waitting
 			if c.checkTaskDone() {
 				c.toNextPhase()
 			}
@@ -191,18 +191,18 @@ func (c *Coordinator) PoolTask(args *TaskArgs, reply *Task) error {
 		if len(c.ReduceTaskChan) > 0 {
 			*reply = *<-c.ReduceTaskChan
 			//fmt.Printf("poll-Reduce-taskid[ %d ]\n", reply.TaskId)
-			if !c.judgeState(reply.id) {
-				fmt.Printf("Reduce-taskid[ %d ] is running\n", reply.id)
+			if !c.judgeState(reply.Id) {
+				fmt.Printf("Reduce-taskid[ %d ] is running\n", reply.Id)
 			}
 		} else {
-			reply.taskType = WaitingTask // 如果map任务被分发完了但是又没完成，此时就将任务设为Waiting
+			reply.TaskType = WaitingTask // 如果map任务被分发完了但是又没完成，此时就将任务设为Waiting
 			if c.checkTaskDone() {
 				c.toNextPhase()
 			}
 			return nil
 		}
 	case AllDone:
-		reply.taskType = ExitTask
+		reply.TaskType = ExitTask
 	default:
 		panic("The phase undefined ! ! !")
 	}
@@ -213,30 +213,30 @@ func (c *Coordinator) PoolTask(args *TaskArgs, reply *Task) error {
 func (c *Coordinator) MarkFinished(args *Task, reply *Task) error {
 	c.Lock()
 	defer c.Unlock()
-	switch args.taskType {
+	switch args.TaskType {
 	case MapTask:
-		meta, ok := c.taskMetaMap[args.id]
+		meta, ok := c.taskMetaMap[args.Id]
 		//prevent a duplicated work which returned from another worker
 		if ok && meta.state == Working {
 			meta.state = Done
 			//fmt.Printf("Map task Id[%d] is finished.\n", args.TaskId)
 		} else if meta.state == Done {
-			fmt.Printf("Map task Id[%d] is finished,already ! ! !\n", args.id)
+			fmt.Printf("Map task Id[%d] is finished,already ! ! !\n", args.Id)
 		} else {
-			fmt.Printf("Map task Id[%d] is in trouble, the task message is %v.\n", args.id, args)
+			fmt.Printf("Map task Id[%d] is in trouble, the task message is %v.\n", args.Id, args)
 		}
 		break
 	case ReduceTask:
-		meta, ok := c.taskMetaMap[args.id]
+		meta, ok := c.taskMetaMap[args.Id]
 
 		//prevent a duplicated work which returned from another worker
 		if ok && meta.state == Working {
 			meta.state = Done
 			//fmt.Printf("Reduce task Id[%d] is finished.\n", args.TaskId)
 		} else if meta.state == Done {
-			fmt.Printf("Reduce task Id[%d] is finished,already ! ! !\n", args.id)
+			fmt.Printf("Reduce task Id[%d] is finished,already ! ! !\n", args.Id)
 		} else {
-			fmt.Printf("Reduce task Id[%d] is in trouble, the task message is %v.\n", args.id, args)
+			fmt.Printf("Reduce task Id[%d] is in trouble, the task message is %v.\n", args.Id, args)
 		}
 		break
 
@@ -248,9 +248,9 @@ func (c *Coordinator) MarkFinished(args *Task, reply *Task) error {
 }
 
 func (c *Coordinator) acceptTaskMeta(taskInfo *TaskMetaInfo) bool {
-	taskId := taskInfo.TaskAdr.id
+	taskId := taskInfo.TaskAdr.Id
 	if _, ok := c.taskMetaMap[taskId]; ok {
-		fmt.Printf("taskMetaMap contains id=%v task\n", taskId)
+		fmt.Printf("taskMetaMap contains Id=%v task\n", taskId)
 		return false
 	} else {
 		c.taskMetaMap[taskId] = taskInfo
@@ -268,13 +268,13 @@ func (c *Coordinator) checkTaskDone() bool {
 	)
 
 	for _, v := range c.taskMetaMap {
-		if v.TaskAdr.taskType == MapTask {
+		if v.TaskAdr.TaskType == MapTask {
 			if v.state == Done {
 				mapDoneNum++
 			} else {
 				mapUnDoneNum++
 			}
-		} else if v.TaskAdr.taskType == ReduceTask {
+		} else if v.TaskAdr.TaskType == ReduceTask {
 			if v.state == Done {
 				reduceDoneNum++
 			} else {
