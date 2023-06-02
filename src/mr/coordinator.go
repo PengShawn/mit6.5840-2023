@@ -62,11 +62,14 @@ func (c *Coordinator) server() {
 // if the entire job has finished.
 //
 func (c *Coordinator) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	c.RLock()
+	defer c.Unlock()
+	if c.phase == AllDone {
+		fmt.Println("All tasks are finished,the coordinator will exit!!!")
+		return true
+	} else {
+		return false
+	}
 }
 
 //
