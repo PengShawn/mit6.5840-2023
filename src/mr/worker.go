@@ -55,7 +55,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		case ExitTask:
 			{
 				time.Sleep(time.Second)
-				fmt.Println("All tasks are Done ,will be exiting...")
+				fmt.Println("All tasks are Done, will be exiting...")
 				keepFlag = false
 			}
 		}
