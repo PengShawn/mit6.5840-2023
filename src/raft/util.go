@@ -54,7 +54,10 @@ func (rf *Raft) getLastTerm() int {
 }
 
 func (rf *Raft) restoreLogTerm(curIndex int) int {
-	if curIndex == 0 {
+	if curIndex <= 0 {
+		return 0
+	}
+	if curIndex >= len(rf.logs) {
 		return 0
 	}
 	return rf.logs[curIndex].Term

@@ -18,12 +18,13 @@ package raft
 //
 
 import (
-	//	"bytes"
+	"bytes"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	//	"mit6.5840-2023/labgob"
+	"mit6.5840-2023/labgob"
 	"mit6.5840-2023/labrpc"
 )
 
@@ -113,14 +114,13 @@ func (rf *Raft) GetState() (int, bool) {
 // after you've implemented snapshots, pass the current snapshot
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.logs)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
 // restore previously persisted state.
@@ -128,19 +128,20 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var votedFor int
+	var logs []LogEntry
+	if d.Decode(&currentTerm) != nil ||
+	   d.Decode(&votedFor) != nil ||
+	   d.Decode(&logs) != nil{
+		fmt.Println("readPersist: decode error")
+	} else {
+	  rf.currentTerm = currentTerm
+	  rf.votedFor = votedFor
+	  rf.logs = logs
+	}
 }
 
 // the service says it has created a snapshot that has
@@ -183,10 +184,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.nodeState = Follower
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
+		rf.votedTime = time.Now()
 		rf.voteNum = 0
+		rf.persist()
 	}
 	if !rf.UpToDate(args.LastLogIndex, args.LastLogTerm) ||
 		rf.votedFor != -1 && rf.votedFor != args.CandidateId && args.Term == reply.Term {
+		rf.votedTime = time.Now()
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 		return
@@ -194,6 +198,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.votedFor = args.CandidateId
 	rf.currentTerm = args.Term
 	rf.votedTime = time.Now()
+	rf.persist()
 	reply.VoteGranted = true
 	reply.Term = rf.currentTerm
 }
@@ -268,6 +273,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.nodeState = Follower
 	rf.voteNum = 0
 	rf.votedTime = time.Now()
+	rf.persist()
 
 	// 如果自身最后的日志比prev小说明中间有缺失日志，such 3、4、5、6、7 返回的开头为6、7，而自身到4，缺失5
 	if rf.getLastIndex() < args.PrevLogIndex {
@@ -276,6 +282,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	} else if rf.restoreLogTerm(args.PrevLogIndex) != args.PrevLogTerm {
 		reply.Success = false
+		reply.UpNextIndex = 0
 		tempTerm := rf.restoreLogTerm(args.PrevLogIndex)
 		for index := args.PrevLogIndex; index >= 0; index-- {
 			if rf.restoreLogTerm(index) != tempTerm {
@@ -288,6 +295,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 	// 进行日志的截取
 	rf.logs = append(rf.logs[:args.PrevLogIndex+1], args.Entries...)
+	rf.persist()
 
 	// commitIndex取leaderCommit与last new entry最小值的原因是，虽然应该更新到leaderCommit，但是new entry的下标更小
 	// 则说明日志不存在，更新commit的目的是为了applied log，这样会导致日志日志下标溢出
@@ -412,6 +420,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := rf.getLastIndex() + 1
 	term := rf.currentTerm
 	rf.logs = append(rf.logs, LogEntry{Term: term, Command: command})
+	rf.persist()
 	return index, term, true
 }
 
@@ -470,6 +479,8 @@ func (rf *Raft) sendElection() {
 					rf.nodeState = Follower
 					rf.votedFor = -1
 					rf.voteNum = 0
+					rf.votedTime = time.Now()
+					rf.persist()
 					rf.mu.Unlock()
 					return
 				}
@@ -481,6 +492,7 @@ func (rf *Raft) sendElection() {
 						rf.nodeState = Leader
 						rf.votedFor = -1
 						rf.voteNum = 0
+						rf.persist()
 
 						rf.nextIndex = make([]int, len(rf.peers))
 						for i := 0; i < len(rf.peers); i++ {
@@ -515,6 +527,7 @@ func (rf *Raft) electionTicker() {
 			rf.voteNum = 1
 			rf.currentTerm += 1
 			rf.votedTime = time.Now()
+			rf.persist()
 			rf.sendElection()
 		}
 		rf.mu.Unlock()
