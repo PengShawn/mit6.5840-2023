@@ -7,13 +7,22 @@ import (
 )
 
 // Debugging
-const Debug = false
+const Debug = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
 		log.Printf(format, a...)
 	}
 	return
+}
+
+// 最小值min
+func min(num int, num1 int) int {
+	if num > num1 {
+		return num1
+	} else {
+		return num
+	}
 }
 
 // 通过不同的随机种子生成不同的过期时间
@@ -58,4 +67,9 @@ func (rf *Raft) getPrevLogInfo(server int) (int, int) {
 		newEntryBeginIndex = lastIndex
 	}
 	return newEntryBeginIndex, rf.restoreLogTerm(newEntryBeginIndex)
+}
+
+// 通过快照偏移还原真实日志条目
+func (rf *Raft) restoreLog(curIndex int) LogEntry {
+	return rf.logs[curIndex]
 }

@@ -41,6 +41,7 @@ const (
 	MinVoteTime = 150
 	MoreVoteTime = 200
 	HeartbeatSleep = 120	// 心跳时间
+	AppliedSleep = 30 		// 
 )
 
 // as each Raft peer becomes aware that successive log entries are
@@ -267,6 +268,32 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.nodeState = Follower
 	rf.voteNum = 0
 	rf.votedTime = time.Now()
+
+	// 如果自身最后的日志比prev小说明中间有缺失日志，such 3、4、5、6、7 返回的开头为6、7，而自身到4，缺失5
+	if rf.getLastIndex() < args.PrevLogIndex {
+		reply.Success = false
+		reply.UpNextIndex = rf.getLastIndex()
+		return
+	} else if rf.restoreLogTerm(args.PrevLogIndex) != args.PrevLogTerm {
+		reply.Success = false
+		tempTerm := rf.restoreLogTerm(args.PrevLogIndex)
+		for index := args.PrevLogIndex; index >= 0; index-- {
+			if rf.restoreLogTerm(index) != tempTerm {
+				reply.UpNextIndex = index + 1
+				break
+			}
+		}
+		return
+	}
+	
+	// 进行日志的截取
+	rf.logs = append(rf.logs[:args.PrevLogIndex+1], args.Entries...)
+
+	// commitIndex取leaderCommit与last new entry最小值的原因是，虽然应该更新到leaderCommit，但是new entry的下标更小
+	// 则说明日志不存在，更新commit的目的是为了applied log，这样会导致日志日志下标溢出
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, rf.getLastIndex())
+	}
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -287,7 +314,6 @@ func (rf *Raft) leaderAppendEntries() {
 				rf.mu.Unlock()
 				return
 			}
-
 			prevLogIndex, prevLogTerm := rf.getPrevLogInfo(server)
 			args := AppendEntriesArgs{
 				Term:         rf.currentTerm,
@@ -296,7 +322,13 @@ func (rf *Raft) leaderAppendEntries() {
 				PrevLogTerm:  prevLogTerm,
 				LeaderCommit: rf.commitIndex,
 			}
-			args.Entries = []LogEntry{}
+			if rf.getLastIndex() >= rf.nextIndex[server] {
+				entries := make([]LogEntry, 0)
+				entries = append(entries, rf.logs[rf.nextIndex[server]:]...)
+				args.Entries = entries
+			} else {
+				args.Entries = []LogEntry{}
+			}
 			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
 
@@ -319,10 +351,40 @@ func (rf *Raft) leaderAppendEntries() {
 					rf.votedTime = time.Now()
 					return
 				}
+
+				if reply.Success {
+					rf.commitIndex = 0
+					rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+					rf.nextIndex[server] = rf.matchIndex[server] + 1
+
+					// 外层遍历下标是否满足
+					for index := rf.getLastIndex(); index >= 1; index-- {
+						sum := 0
+						for i := 0; i < len(rf.peers); i++ {
+							if i == rf.me {
+								sum += 1
+								continue
+							}
+							if rf.matchIndex[i] >= index {
+								sum += 1
+							}
+						}
+
+						// 大于一半，且因为是从后往前，一定会大于原本commitIndex
+						if sum >= len(rf.peers)/2+1 && rf.restoreLogTerm(index) == rf.currentTerm {
+							rf.commitIndex = index
+							break
+						}
+					}
+				} else { // 返回为冲突
+					// 如果冲突不为-1，则进行更新
+					if reply.UpNextIndex != -1 {
+						rf.nextIndex[server] = reply.UpNextIndex
+					}
+				}
 			}
 
 		}(index)
-
 	}
 }
 
@@ -339,13 +401,18 @@ func (rf *Raft) leaderAppendEntries() {
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
-	// Your code here (2B).
-
-	return index, term, isLeader
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.killed() {
+		return -1, -1, false
+	}
+	if rf.nodeState != Leader {
+		return -1, -1, false
+	}
+	index := rf.getLastIndex() + 1
+	term := rf.currentTerm
+	rf.logs = append(rf.logs, LogEntry{Term: term, Command: command})
+	return index, term, true
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -460,10 +527,37 @@ func (rf *Raft) appendTicker() {
 		time.Sleep(HeartbeatSleep * time.Millisecond)
 		rf.mu.Lock()
 		if rf.nodeState == Leader {
-			rf.mu.Unlock()
 			rf.leaderAppendEntries()
-		} else {
+		}
+		rf.mu.Unlock()
+	}
+}
+
+func (rf *Raft) committedTicker() {
+	// put the committed entry to apply on the status machine
+	for !rf.killed() {
+		time.Sleep(AppliedSleep * time.Millisecond)
+		rf.mu.Lock()
+
+		if rf.lastApplied >= rf.commitIndex {
 			rf.mu.Unlock()
+			continue
+		}
+
+		Messages := make([]ApplyMsg, 0)
+		for rf.lastApplied < rf.commitIndex && rf.lastApplied < rf.getLastIndex() {
+			rf.lastApplied += 1
+			Messages = append(Messages, ApplyMsg{
+				CommandValid:  true,
+				SnapshotValid: false,
+				CommandIndex:  rf.lastApplied,
+				Command:       rf.restoreLog(rf.lastApplied).Command,
+			})
+		}
+		rf.mu.Unlock()
+
+		for _, messages := range Messages {
+			rf.applyChan <- messages
 		}
 	}
 }
@@ -503,6 +597,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.electionTicker()
 	go rf.appendTicker()
+	go rf.committedTicker()
 
 	return rf
 }
