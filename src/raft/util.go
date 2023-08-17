@@ -38,29 +38,27 @@ func (rf *Raft) UpToDate(index int, term int) bool {
 	return term > lastTerm || (term == lastTerm && index >= lastIndex)
 }
 
-// 获取最后的日志下标
+// 通过快照偏移获取最后的日志下标
 func (rf *Raft) getLastIndex() int {
-	return len(rf.logs) - 1
+	return len(rf.logs) - 1 + rf.lastIncludedIndex
 }
 
 // 获取最后的日志任期
 func (rf *Raft) getLastTerm() int {
 	// 因为初始有填充一个，所以初始长度为1
 	if len(rf.logs) == 1 {
-		return 0
+		return rf.lastIncludedTerm
 	} else {
 		return rf.logs[len(rf.logs)-1].Term
 	}
 }
 
+// 通过快照偏移返回日志任期
 func (rf *Raft) restoreLogTerm(curIndex int) int {
-	if curIndex <= 0 {
-		return 0
+	if curIndex-rf.lastIncludedIndex <= 0 {
+		return rf.lastIncludedTerm
 	}
-	if curIndex >= len(rf.logs) {
-		return 0
-	}
-	return rf.logs[curIndex].Term
+	return rf.logs[curIndex-rf.lastIncludedIndex].Term
 }
 
 func (rf *Raft) getPrevLogInfo(server int) (int, int) {
@@ -74,5 +72,5 @@ func (rf *Raft) getPrevLogInfo(server int) (int, int) {
 
 // 通过快照偏移还原真实日志条目
 func (rf *Raft) restoreLog(curIndex int) LogEntry {
-	return rf.logs[curIndex]
+	return rf.logs[curIndex-rf.lastIncludedIndex]
 }
